@@ -1,421 +1,517 @@
-
-import os
 import base64
+import json
+import os
 import random
 import re
-from typing import Dict, List
+from typing import Optional
 
-from flask import Flask, request, render_template_string, jsonify
+from flask import Flask, request, render_template_string
 from openai import OpenAI
 
 app = Flask(__name__)
 
-HTML = """
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+AKS_ADDRESS = "Unit 6, Macon Way Business Park, Macon Way, Crewe, CW1 6DG"
+AKS_PHONE = "07842 524607"
+AKS_AREAS = [
+    "Crewe", "Cheshire", "Stoke-on-Trent", "Nantwich",
+    "Winsford", "Middlewich", "Northwich", "Sandbach"
+]
+
+HTML = r"""
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>AKS Marketing Post Builder</title>
   <style>
-    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#07070c;color:#f5f5f7}
-    .wrap{max-width:860px;margin:0 auto;padding:18px}
-    .card{background:linear-gradient(180deg,#121525,#0b0c14);border:1px solid rgba(255,255,255,.08);border-radius:24px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.35);margin-bottom:18px}
-    h1,h2{margin:0 0 12px}
-    h1{font-size:40px;line-height:1.05}
-    h2{font-size:24px}
-    p{line-height:1.45;color:#d7d7de}
-    label{display:block;margin:14px 0 8px;font-weight:700}
-    input,select,textarea,button{font:inherit}
-    input,select,textarea{width:100%;box-sizing:border-box;padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,.12);background:#0f1322;color:#fff}
-    button{width:100%;padding:18px 20px;border:none;border-radius:22px;font-weight:800;cursor:pointer}
-    .primary{background:linear-gradient(180deg,#ff5454,#e61f2f);color:#fff}
-    .secondary{background:#151a2e;color:#fff;border:1px solid rgba(255,255,255,.12)}
-    .pill{display:inline-block;padding:12px 18px;border-radius:999px;background:#141a30;border:1px solid rgba(255,255,255,.08);margin:6px 6px 0 0}
-    .muted{color:#b7b7c4}
-    .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-    @media (max-width:720px){.row{grid-template-columns:1fr}}
-    pre{white-space:pre-wrap;word-wrap:break-word;background:#0b0f1b;border-radius:20px;padding:18px;border:1px solid rgba(255,255,255,.08)}
-    .logo{font-size:40px;font-weight:900;letter-spacing:.5px}
-    .logo .red{color:#ff3131}
+    :root{
+      --bg:#07090f;
+      --panel:#0e1220;
+      --panel-2:#12182a;
+      --line:#2a3150;
+      --text:#f3f4f8;
+      --muted:#b9bfd1;
+      --red:#ef4444;
+      --red2:#dc2626;
+      --green:#22c55e;
+      --pill:#151b31;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;padding:24px 14px 40px;
+      background:linear-gradient(180deg,#210303 0%, #07090f 18%, #07090f 100%);
+      color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    }
+    .wrap{max-width:760px;margin:0 auto}
+    .card{
+      background:linear-gradient(180deg,#101522 0%, #080b14 100%);
+      border:1px solid var(--line);
+      border-radius:28px;
+      padding:22px;
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+      margin-bottom:18px;
+    }
+    h1,h2,h3,p{margin:0}
+    .hero-title{font-size:28px;line-height:1.05;font-weight:800;margin-bottom:8px}
+    .hero-sub{font-size:16px;line-height:1.5;color:var(--muted)}
+    .brand{color:var(--red)}
+    label{display:block;font-size:15px;margin:14px 0 8px;color:#dfe3ee}
+    input[type="text"], textarea, select{
+      width:100%;padding:16px 18px;border-radius:18px;
+      border:1px solid #39415d;background:#0d1222;color:white;
+      font-size:16px;outline:none;
+    }
+    textarea{min-height:96px;resize:vertical}
+    input[type="file"]{
+      width:100%;padding:16px 12px;border-radius:18px;
+      border:1px solid #39415d;background:#0d1222;color:white;
+      font-size:16px;
+    }
+    .btn{
+      width:100%;border:none;border-radius:24px;padding:18px 20px;
+      font-size:18px;font-weight:800;cursor:pointer;
+      margin-top:16px;
+    }
+    .btn-primary{
+      background:linear-gradient(180deg,#ff6464 0%, var(--red2) 100%);
+      color:white;
+      box-shadow:0 10px 24px rgba(220,38,38,.25);
+    }
+    .btn-secondary{
+      background:#10162b;color:white;border:1px solid #36405e;
+    }
+    .pill{
+      display:inline-block;padding:14px 18px;border-radius:999px;
+      border:1px solid #5b4a38;background:#14172a;
+      font-size:16px;margin:8px 8px 0 0;
+    }
+    .muted{color:var(--muted)}
+    .result{
+      white-space:pre-wrap;line-height:1.52;font-size:18px;
+      background:linear-gradient(180deg,#0f1425 0%, #080b14 100%);
+      border-radius:24px;border:1px solid var(--line);padding:20px;
+    }
     .small{font-size:14px}
+    .row{display:grid;grid-template-columns:1fr;gap:14px}
+    .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+    .meta .pill{margin:0;border-color:#34405e;background:#10162b}
+    .ok{color:#9ee6b2}
+    .warn{color:#ffd18e}
+    .copy-btn{
+      display:inline-block;margin-top:16px;padding:14px 18px;border-radius:18px;
+      background:#f0f1f5;color:#111;font-weight:800;border:none;cursor:pointer;
+    }
+    .footer-tip{margin-top:14px;color:#b9bfd1;font-size:14px;text-align:center}
   </style>
 </head>
 <body>
 <div class="wrap">
+
   <div class="card">
-    <div class="logo"><span>AKS</span> <span class="red">Marketing</span> Post Builder</div>
-    <p>Upload a vehicle photo, detect the vehicle with AI, then generate a Facebook post in your AKS style.</p>
-  </div>
-
-  <form class="card" method="post" enctype="multipart/form-data" action="/generate">
-    <div class="row">
-      <div>
-        <label>Upload photo</label>
-        <input type="file" name="photo" accept="image/*" required>
-      </div>
-      <div>
-        <label>Location</label>
-        <input type="text" name="location" placeholder="Crewe" value="Crewe">
-      </div>
-    </div>
-
-    <div class="row">
-      <div>
-        <label>Vehicle</label>
-        <input type="text" name="vehicle_override" placeholder="Leave blank to use AI detection">
-      </div>
-      <div>
-        <label>Service type</label>
-        <select name="service_type">
-          <option value="spare key">Spare key</option>
-          <option value="lost key">Lost key</option>
-          <option value="van key">Van key</option>
-          <option value="diagnostics / coding">Diagnostics / coding</option>
-          <option value="emergency lockout">Emergency lockout</option>
-          <option value="general promo">General promo</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="row">
-      <div>
-        <label>Offer / promo text</label>
-        <input type="text" name="offer_text" placeholder="Same-day service available">
-      </div>
-      <div>
-        <label>Phone</label>
-        <input type="text" name="phone" value="07842 524607">
-      </div>
-    </div>
-
-    <label>Areas covered</label>
-    <input type="text" name="areas" value="Crewe, Cheshire, Stoke-on-Trent, Nantwich, Winsford, Middlewich, Northwich, Sandbach">
-
-    <div style="margin-top:14px">
-      <button class="primary" type="submit">Generate Facebook Post</button>
-    </div>
-  </form>
-
-  {% if result %}
-  <div class="card">
-    <h2>Detection</h2>
-    <div class="pill">🚗 Vehicle: {{ result.vehicle }}</div>
-    <div class="pill">🧠 Confidence: {{ result.confidence }}</div>
-    {% if result.clues %}<p class="small muted">Clues: {{ result.clues }}</p>{% endif %}
+    <div class="hero-title"><span class="brand">AKS</span> Marketing Post Builder</div>
+    <div class="hero-sub">Upload a photo, optionally detect the vehicle with AI, then generate a Facebook post in your AKS style with local SEO hashtags.</div>
   </div>
 
   <div class="card">
-    <h2>Facebook Post</h2>
-    <pre id="postText">{{ result.post }}</pre>
-    <button class="secondary" onclick="copyPost()" type="button">Copy post</button>
+    <form method="post" enctype="multipart/form-data">
+      <label>Upload photo</label>
+      <input type="file" name="photo" accept="image/*">
+
+      <label>Vehicle (manual override)</label>
+      <input type="text" name="vehicle" value="{{ vehicle }}" placeholder="e.g. 2013 Vauxhall Adam">
+
+      <label>Location</label>
+      <input type="text" name="location" value="{{ location }}" placeholder="e.g. Crewe">
+
+      <label>Service type</label>
+      <select name="service_type">
+        {% for opt in service_options %}
+          <option value="{{ opt }}" {% if opt == service_type %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+
+      <label>Offer or promo text (optional)</label>
+      <input type="text" name="offer" value="{{ offer }}" placeholder="e.g. Same-day service available">
+
+      <label>Extra job notes (optional)</label>
+      <textarea name="notes" placeholder="Any useful details you want worked into the post...">{{ notes }}</textarea>
+
+      <button class="btn btn-secondary" name="action" value="detect">Detect vehicle from photo</button>
+      <button class="btn btn-primary" name="action" value="generate">Generate Facebook Post</button>
+    </form>
+
+    {% if detection %}
+      <div class="meta" style="margin-top:18px;">
+        <span class="pill">🧠 Confidence: {{ detection.confidence }}</span>
+        {% if detection.vehicle %}
+          <span class="pill">🚗 Vehicle: {{ detection.vehicle }}</span>
+        {% endif %}
+        {% if detection.service_hint %}
+          <span class="pill">🔧 Service hint: {{ detection.service_hint }}</span>
+        {% endif %}
+      </div>
+      {% if detection.clues %}
+        <div class="result small" style="margin-top:12px;">👀 Clues: {{ detection.clues }}</div>
+      {% endif %}
+    {% endif %}
+
+    {% if status_message %}
+      <div class="result small" style="margin-top:12px;">{{ status_message }}</div>
+    {% endif %}
+  </div>
+
+  {% if post %}
+  <div class="card">
+    <h2 style="font-size:22px;margin-bottom:14px;">Facebook Post</h2>
+    <div id="postText" class="result">{{ post }}</div>
+    <button class="copy-btn" onclick="copyPost()">Copy post</button>
+    <div class="footer-tip">Open in Safari, then tap Share → Add to Home Screen.</div>
   </div>
   {% endif %}
 </div>
+
 <script>
-function copyPost(){
-  const t=document.getElementById('postText');
-  navigator.clipboard.writeText(t.innerText);
-  alert('Post copied');
+function copyPost() {
+  const text = document.getElementById("postText").innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    alert("Post copied");
+  }).catch(() => {
+    alert("Could not copy automatically.");
+  });
 }
 </script>
 </body>
 </html>
 """
 
-BRAND_HINTS = [
-    "Vauxhall","Ford","Mercedes","Mercedes-Benz","BMW","Audi","Volkswagen","VW","Peugeot",
-    "Citroen","Citroën","Renault","Nissan","Toyota","Kia","Hyundai","Land Rover","Skoda",
-    "SEAT","Fiat","Honda","Mini","Dacia","Volvo","Mazda"
+SERVICE_OPTIONS = [
+    "Auto detect / general",
+    "Spare key cut & programmed",
+    "Lost key replacement",
+    "Remote key / fob supplied",
+    "Diagnostics / coding",
+    "Emergency lockout",
+    "Van key service",
 ]
 
-MODEL_HINTS = [
-    "Adam","Corsa","Astra","Vivaro","Combo","Movano","Transit","Transit Custom","Ranger",
-    "Focus","Fiesta","Sprinter","A Class","A-Class","Discovery Sport","Discovery","Berlingo",
-    "Partner","Doblo","Polo","Golf","Transporter","Sportage","Relay","Boxer","Vito","A3","A4"
+INTRO_TEMPLATES = [
+    "🔑 {vehicle} sorted by AKS Auto Key Services in {location} 🔑",
+    "🚗 Another {vehicle} completed in {location} by AKS Auto Key Services",
+    "✅ Job done on this {vehicle} in {location}",
+    "🔧 Another customer sorted with this {vehicle} in {location}",
 ]
 
-def get_client():
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
+MIDDLE_TEMPLATES = [
+    "Another happy customer sorted by AKS Auto Key Services after we supplied and programmed a key solution for this {vehicle} in {location}. 👌",
+    "This {vehicle} came in to us in {location} and we got everything sorted quickly, professionally and without the dealership hassle.",
+    "We recently carried out work on this {vehicle} in {location}, getting the customer back on the road with everything fully tested and working properly.",
+]
+
+BOTTOM_WARNINGS = [
+    "⚠️ Lose that only key and you could be looking at hundreds in recovery & replacement costs",
+    "⚠️ Only got one key left? It can get expensive very quickly if that one goes missing",
+    "⚠️ One working key might seem enough — until you lose it and the costs start stacking up",
+]
+
+BOTTOM_SERVICES = [
+    "✅ Spare keys cut & programmed\n✅ Lost keys replaced\n✅ Remote keys & fobs supplied\n✅ Fast turnaround – no waiting around",
+    "🔑 Spare key cutting & programming\n🔑 Lost key solutions\n🔑 Remote keys & fobs supplied\n🔑 Fast turnaround without the waiting around",
+    "✔️ Spare keys supplied & coded\n✔️ Lost keys replaced\n✔️ Remote keys & fobs available\n✔️ Quick turnaround and hassle-free service",
+]
+
+BOTTOM_CLOSERS = [
+    "Don’t leave it too late — get your spare key sorted today and stay one step ahead 🔐",
+    "Stay one step ahead — getting a spare key sorted now can save a lot of hassle later 🔐",
+    "Avoid the stress and get your spare key sorted before it becomes a bigger problem 🔐",
+]
+
+def to_data_url(file_storage) -> Optional[str]:
+    if not file_storage or not getattr(file_storage, "filename", ""):
         return None
-    return OpenAI(api_key=key)
-
-def image_to_data_url(file_storage) -> str:
-    content = file_storage.read()
+    raw = file_storage.read()
     file_storage.stream.seek(0)
+    if not raw:
+        return None
     mime = file_storage.mimetype or "image/jpeg"
-    encoded = base64.b64encode(content).decode("utf-8")
-    return f"data:{mime};base64,{encoded}"
+    b64 = base64.b64encode(raw).decode("utf-8")
+    return f"data:{mime};base64,{b64}"
 
-def safe_openai_text(client: OpenAI, prompt: str, image_data_url: str) -> str:
-    resp = client.responses.create(
-        model="gpt-4.1-mini",
-        input=[{
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": prompt},
-                {"type": "input_image", "image_url": image_data_url},
-            ],
-        }],
-        temperature=0.1,
-    )
-    return (getattr(resp, "output_text", "") or "").strip()
+def simple_text_vehicle_guess(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        return "Vehicle"
+    brands = [
+        "Vauxhall", "Ford", "BMW", "Audi", "Mercedes", "Volkswagen", "VW",
+        "Peugeot", "Citroen", "Renault", "Nissan", "Toyota", "Kia",
+        "Hyundai", "Land Rover", "Mini", "Skoda", "Seat", "Fiat"
+    ]
+    models = [
+        "Adam", "Corsa", "Astra", "Focus", "Fiesta", "Golf", "Polo",
+        "Vivaro", "Berlingo", "Partner", "Doblo", "Sprinter", "Sportage",
+        "Ranger", "Discovery", "A Class", "A-Class", "Transit", "Transporter"
+    ]
 
-def parse_detection_text(text: str) -> Dict[str, str]:
-    # Try JSON-ish extraction first
-    out = {"make": "", "model": "", "year": "", "body_type": "", "confidence": "low", "clues": ""}
-    pairs = re.findall(r'"?(make|model|year|body_type|confidence|clues)"?\s*:\s*"?(.*?)"?(?:,|\n|$)', text, re.I)
-    for k, v in pairs:
-        out[k.lower()] = v.strip().strip('"')
-    if not pairs:
-        for field in out.keys():
-            m = re.search(field + r"\s*[:\-]\s*(.+)", text, re.I)
-            if m:
-                out[field] = m.group(1).strip().strip('"')
-    out["confidence"] = out["confidence"].lower() if out["confidence"] else "low"
-    return out
+    year_match = re.search(r"\b(19\d{2}|20\d{2})\b", text)
+    year = year_match.group(1) if year_match else ""
 
-def normalize_vehicle(make: str, model: str, year: str) -> str:
-    parts = []
-    if year and re.fullmatch(r"(19|20)\d{2}", year):
-        parts.append(year)
-    if make:
-        make = make.replace("Mercedes-Benz", "Mercedes").replace("Citroën", "Citroen").strip()
-        parts.append(make)
-    if model and model.lower() not in {make.lower() if make else ""}:
-        parts.append(model.strip())
-    return " ".join([p for p in parts if p]).strip() or "Vehicle"
+    brand = next((b for b in brands if b.lower() in text.lower()), "")
+    model = next((m for m in models if m.lower() in text.lower()), "")
 
-def heuristic_vehicle_from_text(text: str) -> str:
-    text_l = text.lower()
-    year = ""
-    y = re.search(r"(19|20)\d{2}", text)
-    if y:
-        year = y.group(0)
-    brand = next((b for b in BRAND_HINTS if b.lower() in text_l), "")
-    model = next((m for m in MODEL_HINTS if m.lower() in text_l), "")
-    return normalize_vehicle(brand, model, year)
+    parts = [p for p in [year, brand, model] if p]
+    return " ".join(parts) if parts else text
 
-def consensus_detect(image_data_url: str) -> Dict[str, str]:
-    client = get_client()
+def detect_vehicle_ai(photo) -> dict:
+    fallback = {
+        "vehicle": "",
+        "confidence": "low",
+        "clues": "AI detection unavailable",
+        "service_hint": "",
+    }
+
     if not client:
-        return {
-            "vehicle": "Vehicle",
-            "confidence": "low",
-            "clues": "AI detection unavailable",
-            "make": "", "model": "", "year": "", "body_type": ""
-        }
+        return fallback
 
-    prompts = [
-        """Identify the main vehicle in this image for an automotive locksmith job.
-Return ONLY lines in this format:
-make: ...
-model: ...
-year: ...
-body_type: ...
-confidence: high|medium|low
-clues: short explanation
-Be conservative. If unsure, leave model blank rather than guessing.""",
-        """You are checking a customer job photo for a UK auto key business.
-Identify the visible vehicle make, likely model, likely year range if visible, body type, and confidence.
-Prefer make-only over a risky model guess.
-Return:
-make: ...
-model: ...
-year: ...
-body_type: ...
-confidence: high|medium|low
-clues: ..."""
-    ]
+    data_url = to_data_url(photo)
+    if not data_url:
+        return fallback
 
-    parsed: List[Dict[str, str]] = []
-    raw_texts = []
-    for prompt in prompts:
-        try:
-            txt = safe_openai_text(client, prompt, image_data_url)
-            raw_texts.append(txt)
-            parsed.append(parse_detection_text(txt))
-        except Exception:
-            continue
-
-    if not parsed:
-        return {
-            "vehicle": "Vehicle",
-            "confidence": "low",
-            "clues": "AI detection unavailable",
-            "make": "", "model": "", "year": "", "body_type": ""
-        }
-
-    makes = [p.get("make", "") for p in parsed if p.get("make")]
-    models = [p.get("model", "") for p in parsed if p.get("model")]
-    years = [p.get("year", "") for p in parsed if p.get("year")]
-    bodies = [p.get("body_type", "") for p in parsed if p.get("body_type")]
-    confs = [p.get("confidence", "low") for p in parsed]
-
-    make = makes[0] if makes else ""
-    if len(set([m.lower() for m in makes])) > 1:
-        # disagreement: drop to safest make present in first pass
-        make = makes[0]
-
-    model = models[0] if models else ""
-    if len(set([m.lower() for m in models])) > 1:
-        # disagreement on model: suppress model
-        model = ""
-
-    year = years[0] if years else ""
-    body = bodies[0] if bodies else ""
-    if "high" in confs and make and (model or year):
-        confidence = "high"
-    elif make:
-        confidence = "medium" if model or year else "low"
-    else:
-        confidence = "low"
-
-    vehicle = normalize_vehicle(make, model if confidence != "low" else "", year if confidence == "high" else "")
-    clues = " | ".join([t[:120] for t in raw_texts if t])[:260]
-
-    # Safer fallback if only low confidence
-    if vehicle == "Vehicle":
-        vehicle = heuristic_vehicle_from_text(clues)
-
-    return {
-        "vehicle": vehicle if vehicle else "Vehicle",
-        "confidence": confidence,
-        "clues": clues or "Conservative fallback used",
-        "make": make, "model": model, "year": year, "body_type": body
-    }
-
-def clean_vehicle_for_tags(vehicle: str) -> List[str]:
-    return [w for w in re.split(r"[^A-Za-z0-9]+", vehicle) if len(w) > 2]
-
-def smart_hashtags(vehicle: str, location: str, service_type: str) -> str:
-    base = [
-        "#AutoKeyServices", "#CarKeyReplacement", "#SpareCarKey", "#AutoLocksmith",
-        "#CarLocksmith", "#KeyProgramming", "#VehicleKeys", "#LostCarKeys", "#AKSAutoKeys"
-    ]
-    local = [f"#{location.replace(' ', '')}", "#Crewe", "#Cheshire", "#Nantwich", "#Sandbach"]
-    service_map = {
-        "spare key": ["#SpareKey", "#CarKeyCutting"],
-        "lost key": ["#LostCarKey", "#ReplacementKey"],
-        "van key": ["#VanKeys", "#CommercialVehicleKeys"],
-        "diagnostics / coding": ["#VehicleDiagnostics", "#Coding"],
-        "emergency lockout": ["#LockedOut", "#EmergencyLocksmith"],
-        "general promo": ["#LocalBusiness", "#AutoKeys"],
-    }
-    tags = base + local + service_map.get(service_type, [])
-    tags += [f"#{w}" for w in clean_vehicle_for_tags(vehicle)[:3]]
-    unique = []
-    for t in tags:
-        if t not in unique:
-            unique.append(t)
-    return " ".join(unique[:12])
-
-def varied_intro(vehicle: str, location: str, service_type: str) -> str:
-    choices = [
-        f"🔑 {vehicle} sorted in {location} by AKS Auto Key Services.",
-        f"✅ Another {vehicle} job completed in {location}.",
-        f"🚗 We recently carried out work on this {vehicle} in {location}.",
-        f"🔧 Another customer sorted with a {vehicle} job in {location}.",
-    ]
-    if service_type == "lost key":
-        choices += [
-            f"🚨 Lost key situation sorted on this {vehicle} in {location}.",
-            f"🔑 Customer back on the road after a lost key job on this {vehicle} in {location}.",
-        ]
-    return random.choice(choices)
-
-def service_block(service_type: str, vehicle: str) -> str:
-    mapping = {
-        "spare key": "We carried out:\n✅ Spare key cutting & programming\n✅ Remote / transponder setup\n✅ Fully tested and working perfectly",
-        "lost key": "We carried out:\n✅ Lost key replacement\n✅ New key supplied & programmed\n✅ Fully tested and ready to go",
-        "van key": "We carried out:\n✅ Van key cutting & programming\n✅ Remote / transponder setup\n✅ Fully tested and working perfectly",
-        "diagnostics / coding": "We carried out:\n✅ Diagnostic work / coding\n✅ System checks & setup\n✅ Fully tested and working correctly",
-        "emergency lockout": "We carried out:\n✅ Rapid vehicle entry support\n✅ Key / lock assessment\n✅ Fast assistance to get things moving again",
-        "general promo": "We carried out:\n✅ Vehicle key services\n✅ Remote / transponder support\n✅ Fast turnaround and testing",
-    }
-    return mapping.get(service_type, mapping["general promo"])
-
-def cta_bottom(phone: str, areas: str, offer_text: str) -> str:
-    warnings = [
-        "⚠️ Lose that only key and you could be looking at hundreds in recovery & replacement costs",
-        "⚠️ Only got one key? Losing it can turn into an expensive problem fast",
-        "⚠️ One working key is a risk — a spare now can save a lot of hassle later",
-    ]
-    service_bits = [
-        "✅ Spare keys cut & programmed\n✅ Lost keys replaced\n✅ Remote keys & fobs supplied\n✅ Fast turnaround – no waiting around",
-        "✅ Spare keys supplied & coded\n✅ Lost key solutions available\n✅ Remote keys & fobs programmed\n✅ Quick turnaround with no dealership delays",
-        "✅ Spare key cutting & programming\n✅ Replacement keys for lost keys\n✅ Remote fobs supplied & set up\n✅ Fast, efficient turnaround",
-    ]
-    closers = [
-        "Don’t leave it too late — get your spare key sorted today and stay one step ahead 🔐",
-        "Stay one step ahead — getting a spare key sorted now can save a lot of stress 🔐",
-        "Best sorted before it becomes a bigger problem — get your spare key booked in today 🔐",
-    ]
-    offer_line = f"\n🔥 {offer_text}\n" if offer_text.strip() else "\n"
-    return (
-        f"{random.choice(warnings)}\n"
-        f"{random.choice(service_bits)}\n"
-        f"{random.choice(closers)}\n"
-        f"{offer_line}"
-        "📍 Visit us: Unit 6, Macon Way Business Park, Macon Way, Crewe, CW1 6DG\n"
-        f"📞 Call / WhatsApp: {phone}\n"
-        f"📍 Areas covered: {areas}\n"
-        "💬 Message us now for a quote or to book in!"
+    prompt = (
+        "Look at this vehicle-related image and identify the vehicle as safely as possible. "
+        "Return strict JSON only with keys: "
+        'vehicle, make, model, year, confidence, clues, service_hint. '
+        "Use confidence values high, medium, or low. "
+        "If uncertain, prefer a broader answer like make-only instead of guessing a specific model. "
+        "service_hint should be one of: spare key, lost key, diagnostics, coding, van key, lockout, unknown. "
+        "clues should be a short plain-English sentence."
     )
 
-def build_post(vehicle: str, location: str, service_type: str, phone: str, areas: str, offer_text: str) -> str:
-    title_options = [
-        f"🔑 {vehicle} {service_type.title()} Job Completed 🔑",
-        f"🚗 {vehicle} – {service_type.title()} Sorted ✅",
-        f"🔧 {vehicle} in for {service_type.title()} in {location}",
-    ]
-    post = [
-        random.choice(title_options),
-        "",
-        varied_intro(vehicle, location, service_type),
-        "",
-        f"📍 {location}",
-        "",
-        service_block(service_type, vehicle),
-        "",
-        cta_bottom(phone, areas, offer_text),
-        "",
-        smart_hashtags(vehicle, location, service_type),
-    ]
-    return "\n".join(post)
+    try:
+        response = client.responses.create(
+            model="gpt-5.4",
+            input=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image", "image_url": data_url},
+                ],
+            }],
+        )
+        text = (response.output_text or "").strip()
+        data = json.loads(text)
 
-@app.route("/", methods=["GET"])
-def index():
-    return render_template_string(HTML, result=None)
+        vehicle = (data.get("vehicle") or "").strip()
+        make = (data.get("make") or "").strip()
+        model = (data.get("model") or "").strip()
+        year = str(data.get("year") or "").strip()
+        confidence = (data.get("confidence") or "low").strip().lower()
+        clues = (data.get("clues") or "AI detection complete.").strip()
+        service_hint = (data.get("service_hint") or "unknown").strip().lower()
 
-@app.route("/generate", methods=["POST"])
-def generate():
-    photo = request.files.get("photo")
-    if not photo:
-        return render_template_string(HTML, result={"vehicle":"Vehicle","confidence":"low","clues":"No photo uploaded","post":"Please upload a photo."})
+        if confidence not in {"high", "medium", "low"}:
+            confidence = "low"
 
-    location = (request.form.get("location") or "Crewe").strip()
-    service_type = (request.form.get("service_type") or "spare key").strip().lower()
-    offer_text = (request.form.get("offer_text") or "").strip()
-    phone = (request.form.get("phone") or "07842 524607").strip()
-    areas = (request.form.get("areas") or "Crewe, Cheshire, Stoke-on-Trent, Nantwich, Winsford, Middlewich, Northwich, Sandbach").strip()
-    manual_vehicle = (request.form.get("vehicle_override") or "").strip()
+        # Safer fallback assembly
+        if not vehicle:
+            parts = [p for p in [year, make, model] if p]
+            vehicle = " ".join(parts).strip()
 
-    image_data_url = image_to_data_url(photo)
-    detection = consensus_detect(image_data_url)
+        if confidence == "low" and make:
+            vehicle = f"{year + ' ' if year else ''}{make}".strip()
 
-    vehicle = manual_vehicle or detection.get("vehicle") or "Vehicle"
-    post = build_post(vehicle, location, service_type, phone, areas, offer_text)
+        if not vehicle:
+            vehicle = ""
 
-    result = {
-        "vehicle": vehicle,
-        "confidence": detection.get("confidence", "low"),
-        "clues": detection.get("clues", "AI detection unavailable"),
-        "post": post,
+        return {
+            "vehicle": vehicle,
+            "confidence": confidence,
+            "clues": clues,
+            "service_hint": service_hint,
+        }
+    except Exception:
+        return fallback
+
+def generate_hashtags(vehicle: str, location: str, service_type: str) -> str:
+    clean_loc = "#" + re.sub(r"[^A-Za-z0-9]", "", location) if location else "#Crewe"
+    vehicle_words = [w for w in re.split(r"[\s/,-]+", vehicle) if w]
+    vehicle_tags = []
+    for w in vehicle_words[:3]:
+        cleaned = re.sub(r"[^A-Za-z0-9]", "", w)
+        if cleaned and len(cleaned) > 1:
+            vehicle_tags.append("#" + cleaned)
+
+    service_map = {
+        "Spare key cut & programmed": ["#SpareCarKey", "#KeyProgramming"],
+        "Lost key replacement": ["#LostCarKeys", "#CarKeyReplacement"],
+        "Remote key / fob supplied": ["#RemoteKey", "#KeyFob"],
+        "Diagnostics / coding": ["#Diagnostics", "#Coding"],
+        "Emergency lockout": ["#LockedOut", "#EmergencyLocksmith"],
+        "Van key service": ["#VanKey", "#VanLocksmith"],
+        "Auto detect / general": ["#AutoLocksmith", "#VehicleKeys"],
     }
-    return render_template_string(HTML, result=result)
+
+    tags = [
+        "#AKSAutoKeyServices", "#AutoLocksmith", "#CarKeyReplacement",
+        "#KeyProgramming", "#SpareCarKey", "#VehicleKeys",
+        "#Crewe", "#Cheshire", clean_loc
+    ]
+    tags.extend(service_map.get(service_type, service_map["Auto detect / general"]))
+    tags.extend(vehicle_tags)
+
+    # de-dupe while preserving order
+    seen = set()
+    final_tags = []
+    for t in tags:
+        if t not in seen:
+            seen.add(t)
+            final_tags.append(t)
+    return " ".join(final_tags[:14])
+
+def varied_service_lines(service_type: str) -> str:
+    options = {
+        "Spare key cut & programmed": [
+            "✅ Spare key cutting & programming\n✅ Remote / transponder setup\n✅ Fully tested and working perfectly",
+            "✅ Spare key supplied and programmed\n✅ Key functions checked\n✅ Ready to use straight away",
+        ],
+        "Lost key replacement": [
+            "✅ Lost key solution provided\n✅ Replacement key supplied & programmed\n✅ Everything tested before handover",
+            "✅ New key supplied for a lost key situation\n✅ Programmed and matched to the vehicle\n✅ Checked and working correctly",
+        ],
+        "Remote key / fob supplied": [
+            "✅ Remote key / fob supplied\n✅ Programmed to the vehicle\n✅ Fully tested and working properly",
+            "✅ Replacement remote supplied\n✅ Key and button functions programmed\n✅ Everything checked before completion",
+        ],
+        "Diagnostics / coding": [
+            "✅ Diagnostic work carried out\n✅ Coding / programming completed\n✅ Vehicle checked and working correctly",
+            "✅ Fault finding and coding completed\n✅ Module / key setup sorted\n✅ Final checks carried out",
+        ],
+        "Emergency lockout": [
+            "✅ Fast response lockout assistance\n✅ Vehicle access regained\n✅ Customer back on the road quickly",
+            "✅ Lockout assistance completed\n✅ Entry gained without the dealership hassle\n✅ Quick turnaround",
+        ],
+        "Van key service": [
+            "✅ Van key supplied / programmed\n✅ Remote / transponder setup\n✅ Fully tested and ready to go",
+            "✅ Spare / replacement van key sorted\n✅ Key functions checked\n✅ Quick turnaround",
+        ],
+        "Auto detect / general": [
+            "✅ Key cutting & programming carried out\n✅ Remote / transponder setup\n✅ Fully tested and working perfectly",
+            "✅ Vehicle key work completed\n✅ Key functions checked\n✅ Everything tested before completion",
+        ],
+    }
+    return random.choice(options.get(service_type, options["Auto detect / general"]))
+
+def generate_post(vehicle: str, location: str, service_type: str, offer: str, notes: str) -> str:
+    vehicle = vehicle.strip() if vehicle else "Vehicle"
+    location = location.strip() if location else "Crewe"
+
+    intro = random.choice(INTRO_TEMPLATES).format(vehicle=vehicle, location=location)
+    middle = random.choice(MIDDLE_TEMPLATES).format(vehicle=vehicle, location=location)
+    services = varied_service_lines(service_type)
+    warning = random.choice(BOTTOM_WARNINGS)
+    bottom_services = random.choice(BOTTOM_SERVICES)
+    closer = random.choice(BOTTOM_CLOSERS)
+    hashtags = generate_hashtags(vehicle, location, service_type)
+
+    offer_line = f"\n🔥 {offer.strip()}" if offer and offer.strip() else ""
+    notes_line = ""
+    if notes and notes.strip():
+        trimmed = notes.strip()
+        notes_line = f"\n\n💬 Extra detail: {trimmed}"
+
+    areas = ", ".join(AKS_AREAS)
+
+    title_tail = {
+        "Spare key cut & programmed": "Spare Key Job Completed",
+        "Lost key replacement": "Lost Key Solution Completed",
+        "Remote key / fob supplied": "Remote Key / Fob Supplied",
+        "Diagnostics / coding": "Diagnostics / Coding Completed",
+        "Emergency lockout": "Lockout Assistance Completed",
+        "Van key service": "Van Key Job Completed",
+        "Auto detect / general": "Vehicle Key Job Completed",
+    }.get(service_type, "Vehicle Key Job Completed")
+
+    post = (
+        f"{intro}\n\n"
+        f"{middle}\n\n"
+        f"📍 {location}\n\n"
+        f"We carried out:\n"
+        f"{services}\n\n"
+        f"🚗 {vehicle}\n"
+        f"🔧 {title_tail}\n\n"
+        f"{warning}\n"
+        f"{bottom_services}\n"
+        f"{closer}\n"
+        f"📍 Visit us: {AKS_ADDRESS}\n"
+        f"📞 Call / WhatsApp: {AKS_PHONE}\n"
+        f"💬 Message us now for a quote or to book in!\n"
+        f"📍 Areas covered: {areas}"
+        f"{offer_line}"
+        f"{notes_line}\n\n"
+        f"{hashtags}"
+    )
+    return post
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    vehicle = ""
+    location = "Crewe"
+    service_type = "Auto detect / general"
+    offer = ""
+    notes = ""
+    post = ""
+    detection = None
+    status_message = ""
+
+    if request.method == "POST":
+        action = request.form.get("action", "generate")
+        manual_vehicle = (request.form.get("vehicle") or "").strip()
+        location = (request.form.get("location") or "Crewe").strip()
+        service_type = request.form.get("service_type") or "Auto detect / general"
+        offer = (request.form.get("offer") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        photo = request.files.get("photo")
+
+        detection = detect_vehicle_ai(photo) if photo and getattr(photo, "filename", "") else None
+
+        # Decide vehicle
+        if manual_vehicle:
+            vehicle = manual_vehicle
+        elif detection and detection.get("vehicle"):
+            vehicle = detection["vehicle"]
+        else:
+            vehicle = simple_text_vehicle_guess(notes)
+
+        if action == "detect":
+            status_message = "Vehicle detection updated. You can still edit the vehicle field manually before generating the post."
+            if detection and detection.get("service_hint") and service_type == "Auto detect / general":
+                hint = detection["service_hint"]
+                mapping = {
+                    "spare key": "Spare key cut & programmed",
+                    "lost key": "Lost key replacement",
+                    "diagnostics": "Diagnostics / coding",
+                    "coding": "Diagnostics / coding",
+                    "van key": "Van key service",
+                    "lockout": "Emergency lockout",
+                }
+                service_type = mapping.get(hint, service_type)
+        else:
+            post = generate_post(vehicle=vehicle, location=location, service_type=service_type, offer=offer, notes=notes)
+
+    return render_template_string(
+        HTML,
+        vehicle=vehicle,
+        location=location,
+        service_type=service_type,
+        offer=offer,
+        notes=notes,
+        post=post,
+        detection=detection,
+        status_message=status_message,
+        service_options=SERVICE_OPTIONS,
+    )
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "10000"))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
