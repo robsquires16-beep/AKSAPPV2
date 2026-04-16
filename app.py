@@ -72,7 +72,7 @@ def fallback_copy(service_area, business_name, phone, tone, post_style, seo_city
         f"{opener} {biz} offers mobile auto locksmith support across {area}. {body} in {city}. "
         f"""We help with car key replacement, spare keys, ignition key issues, and same-day callouts when possible.{offer_line}{phone_line}"""
 
-"
+
         f"Message us now for a quote or fast assistance.{book_line}"
     )
 
