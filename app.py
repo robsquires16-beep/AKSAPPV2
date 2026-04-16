@@ -92,7 +92,7 @@ def fallback_copy(service_area, business_name, phone, tone, post_style, seo_city
         "hashtags": hashtags,
         "alt_text": "Promotional image for AKS Auto Key Services mobile car key replacement and key fob programming.",
         "cta": cta,
-        "share_text": f"{post}
+        "share_text": f"{post}"
 
 {cta}",
         "note": note or "Generated in fallback mode because no OpenAI API connection was available.",
