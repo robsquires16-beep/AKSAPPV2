@@ -530,7 +530,7 @@ def build_hashtags(vehicle, location, service, style):
     midpoint = min(7, max(5, len(unique) // 2))
     if len(unique) <= midpoint:
         return " ".join(unique)
-    return "\n".join(unique[:midpoint]) + "
+    return "\n".join(unique[:midpoint]) + 
 " + " ".join(unique[midpoint:])
 
 
